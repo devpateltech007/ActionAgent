@@ -1,33 +1,65 @@
-
 // Add this to your existing background script
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "executeSingle") {
-    executeSingleTool(message.call)
-      .then(result => sendResponse(result))
-      .catch(error => sendResponse({
-        status: "error", 
-        message: error.message
-      }));
-    return true; // Keep message channel open for async response
+  switch (message.type) {
+
+    case "logAction":
+      // 1) retrieve existing log (defaults to [])
+      chrome.storage.local.get({ actionLog: [] }, ({ actionLog }) => {
+        actionLog.push(message.payload);
+        // 2) save it back
+        chrome.storage.local.set({ actionLog }, () => {
+          sendResponse({ status: "ok" });
+        });
+      });
+      return true;  // keep channel open
+
+    case "getLog":
+      chrome.storage.local.get({ actionLog: [] }, ({ actionLog }) => {
+        // return as a string so the popup can interpolate easily
+        sendResponse({ log: JSON.stringify(actionLog, null, 2) });
+      });
+      return true;
+
+    case "executeBatch":
+      // run calls sequentially
+      executeBatch(message.calls)
+        .then(result => sendResponse(result))
+        .catch(err => sendResponse({ status: "error", message: err.message }));
+      return true;
+
+    case "executeSingle":
+      executeSingleTool(message.call)
+        .then(result => sendResponse(result))
+        .catch(err => sendResponse({ status: "error", message: err.message }));
+      return true;
+      
+    // you can keep other handlers here...
   }
-  
-  // Your existing message handlers...
 });
 
+// helper to run an array of calls in order
+async function executeBatch(calls) {
+  for (const call of calls) {
+    const result = await executeSingleTool(call);
+    if (result.status === "error") {
+      throw new Error(`At call ${JSON.stringify(call)} → ${result.message}`);
+    }
+  }
+  return { status: "done" };
+}
+
+// your existing executeSingleTool(...) goes here unchanged
 async function executeSingleTool(call) {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
     switch (call.tool) {
       case "open_tab":
         await chrome.tabs.create({ url: call.args.url });
         return { status: "success" };
-        
       case "wait":
-        await new Promise(resolve => setTimeout(resolve, call.args.ms));
+        await new Promise(r => setTimeout(r, call.args.ms));
         return { status: "success" };
-        
       case "click":
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
@@ -35,7 +67,6 @@ async function executeSingleTool(call) {
           args: [call.args.selector]
         });
         return { status: "success" };
-        
       case "type_text":
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
@@ -43,7 +74,6 @@ async function executeSingleTool(call) {
           args: [call.args.selector, call.args.text, call.args.pressEnter]
         });
         return { status: "success" };
-        
       case "press_key":
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
@@ -51,12 +81,11 @@ async function executeSingleTool(call) {
           args: [call.args.key]
         });
         return { status: "success" };
-        
       default:
         throw new Error(`Unknown tool: ${call.tool}`);
     }
-  } catch (error) {
-    return { status: "error", message: error.message };
+  } catch (e) {
+    return { status: "error", message: e.message };
   }
 }
 

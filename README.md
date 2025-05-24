@@ -84,4 +84,3 @@ Open the `background.js` file and update the API key and optional header details
   
 - **Extension Errors:**  
   Check the Chrome Extensions page or the background script console (via chrome://extensions/) for error messages that can help diagnose issues.
-
