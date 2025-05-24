@@ -28,39 +28,26 @@ ActionAgent/
 
 ## Setup
 
-### 1. Configure the OpenRouter API Key
+### 1. Configure the Cerebras API Key
 
-Open the `background.js` file and update the API key and optional header details to match your OpenRouter account:
+Open the `background.js` file and update the API key and optional header details to match your Cerebras account:
 
 ```javascript
-// Example in background.js:
-const apiKey = "YOUR_OPENROUTER_API_KEY"; // Replace with your actual API key
-const openRouterUrl = "https://openrouter.ai/api/v1/chat/completions";
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'queryLLM') {
-    fetch(openRouterUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        // Optional headers:
-        'HTTP-Referer': 'http://localhost',
-        'X-Title': 'ActionAgent'
-      },
-      body: JSON.stringify({ 
-        model: "qwen/qwen3-32b:free",
-        messages: [
-          { role: "user", content: message.query }
-        ]
-      })
+// Example in popup.js:
+  const res = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { 
+      "Content-Type": "application/json", 
+      "Authorization": "Bearer YOUR_CEREBRAS_API_KEY" 
+    },
+    body: JSON.stringify({ 
+      model: "qwen-3-32b", 
+      messages: [
+        { role:"system", content: SYSTEM_PROMPT },
+        { role:"user", content: `Current page log:\n${log}\n\nUser request: ${userRequest}\n\nGenerate tool calls to fulfill this request. Remember to add wait after opening tabs and use specific selectors.` },
+      ]  
     })
-    .then(res => res.json())
-    .then(data => sendResponse(data))
-    .catch(err => sendResponse({ error: err.toString() }));
-    return true;  // Keep message channel open for async response
-  }
-});
+  });
 ```
 
 ### 2. Load the Extension in Chrome
@@ -93,11 +80,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 ## Troubleshooting
 
 - **Authentication Issues:**  
-  If you receive errors like "No auth credentials found," ensure that your API key in `background.js` is correct and has no extra quotes or whitespace.
+  If you receive errors like "No auth credentials found," ensure that your API key in `popup.js` is correct and has no extra quotes or whitespace.
   
 - **Extension Errors:**  
   Check the Chrome Extensions page or the background script console (via chrome://extensions/) for error messages that can help diagnose issues.
 
-## License
-
-Include your license information here if applicable.
