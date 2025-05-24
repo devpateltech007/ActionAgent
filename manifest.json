@@ -4,9 +4,10 @@
   "description": "Logs user interactions locally and automates via batch tool calls.",
   "version": "3.2",
   "permissions": [
-    "scripting",
     "tabs",
-    "storage"
+    "scripting",
+    "storage",
+    "activeTab"
   ],
   "host_permissions": [
     "<all_urls>"
