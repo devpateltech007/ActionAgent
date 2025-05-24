@@ -1,87 +1,124 @@
-# ActionAgent Chrome Extension
+/*
+Directory Structure:
+chrome-action-agent/
+├── background.js
+├── content.js
+├── database.js
+├── manifest.json
+├── popup.html
+├── popup.js
+*/
 
-ActionAgent is a Chrome extension that logs user interactions in Chrome and, on user request, queries an LLM with the history of user interactions to provide context-aware automation. It is designed to automate everyday tasks such as downloading assets, searching for videos or music, placing orders on e-commerce platforms, and seamlessly browsing the web—empowering users to accomplish repetitive actions efficiently and effortlessly.
+/* manifest.json */
+{
+  "manifest_version": 3,
+  "name": "Action Agent",
+  "version": "1.0",
+  "permissions": [
+    "scripting",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Action Agent"
+  }
+}
 
-## Example Use Cases
-
-ActionAgent empowers users to automate complex, multi-step workflows across the web with a single click or natural language command. For example:
-
-- **Automate Job Applications:** Automatically fill out job application forms, upload your resume, and submit applications on multiple job portals.
-- **Streamline Online Shopping:** Search for products, compare prices, add items to your cart, and complete purchases on e-commerce platforms—all hands-free.
-- **Efficient Research:** Collect information from various sources, summarize articles, and organize research notes as you browse.
-- **Media Management:** Find, download, and organize music or videos from different platforms based on your preferences.
-- **Routine Reporting:** Log into dashboards, extract data, and compile reports without manual intervention.
-
-By leveraging the power of LLMs and real-time user context, ActionAgent transforms repetitive browser tasks into intelligent, automated workflows—saving time, reducing errors, and boosting productivity for professionals, students, and everyday users alike.
-
-## Directory Structure
-
-```
-ActionAgent/
-├── background.js       // Background script handling API calls and message routing
-├── content.js          // Content script for interacting with webpage elements
-├── manifest.json       // Chrome extension manifest
-├── popup.html          // Popup for user interface
-├── popup.js            // Script for handling popup interactions
-└── README.md           // Project Readme
-```
-
-## Setup
-
-### 1. Configure the Cerebras API Key
-
-Open the `background.js` file and update the API key and optional header details to match your Cerebras account:
-
-```javascript
-// Example in popup.js:
-  const res = await fetch("https://api.cerebras.ai/v1/chat/completions", {
-    method: "POST",
-    headers: { 
-      "Content-Type": "application/json", 
-      "Authorization": "Bearer YOUR_CEREBRAS_API_KEY" 
-    },
-    body: JSON.stringify({ 
-      model: "qwen-3-32b", 
-      messages: [
-        { role:"system", content: SYSTEM_PROMPT },
-        { role:"user", content: `Current page log:\n${log}\n\nUser request: ${userRequest}\n\nGenerate tool calls to fulfill this request. Remember to add wait after opening tabs and use specific selectors.` },
-      ]  
+/* background.js */
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'logAction') {
+    saveAction(message.payload);
+  } else if (message.type === 'queryLLM') {
+    fetch('https://your-llm-api-endpoint.com/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: message.query })
     })
+    .then(res => res.json())
+    .then(data => sendResponse(data))
+    .catch(err => sendResponse({ error: err.toString() }));
+    return true; // keep sendResponse alive
+  }
+});
+
+function saveAction(action) {
+  chrome.storage.local.get({ actions: [] }, (result) => {
+    const actions = result.actions;
+    actions.push(action);
+    chrome.storage.local.set({ actions });
   });
-```
+}
 
-### 2. Load the Extension in Chrome
+/* content.js */
+document.addEventListener('click', (e) => {
+  const target = e.target.closest('a, button');
+  if (target) {
+    chrome.runtime.sendMessage({
+      type: 'logAction',
+      payload: {
+        timestamp: new Date().toISOString(),
+        action: 'click',
+        targetText: target.innerText,
+        url: location.href,
+        htmlSnapshot: target.outerHTML
+      }
+    });
+  }
+});
 
-1. Open Google Chrome and navigate to `chrome://extensions/`.
-2. Enable **Developer mode** using the toggle in the top-right corner.
-3. Click on **Load unpacked** and select the folder where the extension (ActionAgent) is located.
+/* popup.html */
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: sans-serif; padding: 10px; }
+    textarea { width: 100%; height: 100px; }
+    button { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h3>Ask Action Agent</h3>
+  <textarea id="userQuery"></textarea><br>
+  <button id="send">Send</button>
+  <pre id="response"></pre>
+  <script src="popup.js"></script>
+</body>
+</html>
 
-## How It Works
-
-- **Background Script (`background.js`):**  
-  Listens for messages from the extension’s popup or content scripts. When it receives a message of type `queryLLM`, it sends a POST request directly to the OpenRouter API endpoint with your query.
-  
-- **Content Script (`content.js`):**  
-  Monitors webpage interactions and sends relevant actions or queries to the background script.
-  
-- **Popup (`popup.html` & `popup.js`):**  
-  Provides a UI for users to manually input queries. When a query is submitted, it is forwarded to the background script for processing.
-
-## Usage
-
-1. **Send a Query:**
-   - Click the ActionAgent icon to open the popup.
-   - Enter a query (e.g., "What is the capital of France?") and click **Send**.
-   - The background script sends the request to OpenRouter and returns the chatbot's response.
-
-2. **Automatic Action Logging:**
-   - The extension may log various actions (e.g., button clicks) on webpages and use them as triggers for additional functionality.
-
-## Troubleshooting
-
-- **Authentication Issues:**  
-  If you receive errors like "No auth credentials found," ensure that your API key in `popup.js` is correct and has no extra quotes or whitespace.
-  
-- **Extension Errors:**  
-  Check the Chrome Extensions page or the background script console (via chrome://extensions/) for error messages that can help diagnose issues.
-
+/* popup.js */
+document.getElementById('send').addEventListener('click', () => {
+  const query = document.getElementById('userQuery').value;
+  chrome.runtime.sendMessage({ type: 'queryLLM', query }, (response) => {
+    document.getElementById('response').textContent = JSON.stringify(response, null, 2);
+    if (response.task === 'play_song' && response.platform === 'YouTube Music') {
+      chrome.tabs.create({ url: 'https://music.youtube.com/' }, (tab) => {
+        chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (song) => {
+            const input = document.querySelector('input[placeholder="Search"]');
+            input.value = song;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            setTimeout(() => {
+              const result = document.querySelector('ytmusic-shelf-renderer ytmusic-responsive-list-item-renderer');
+              if (result) result.click();
+            }, 3000);
+          },
+          args: [response.song]
+        });
+      });
+    }
+  });
+});
