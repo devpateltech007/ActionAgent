@@ -27,7 +27,7 @@ sendBtn.onclick = async () => {
   console.log(log);
   const res = await fetch("https://api.cerebras.ai/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Bearer csk-fwptx54vwwcet2j2djjvm2hrhjp5mdj3w9hdkp3d4ektd9yp" },
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer YOUR_CEREBRAS_KEY" },
     body: JSON.stringify({ model: "qwen-3-32b", messages: [
       { role:"system", content:SYSTEM_PROMPT },
       { role:"user", content:`Log:\n${log}\n\nRequest: ${userRequest}` },
