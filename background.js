@@ -33,10 +33,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .then(result => sendResponse(result))
         .catch(err => sendResponse({ status: "error", message: err.message }));
       return true;
-      
+
     // you can keep other handlers here...
   }
 });
+
+function waitForTabLoad(tabId) {
+  console.log("Waited for tab ", tabId);
+  return new Promise(resolve => {
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
 
 // helper to run an array of calls in order
 async function executeBatch(calls) {
@@ -53,37 +66,126 @@ async function executeBatch(calls) {
 async function executeSingleTool(call) {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
     switch (call.tool) {
-      case "open_tab":
-        await chrome.tabs.create({ url: call.args.url });
+      case "open_tab": {
+        // open, then wait for load
+        const createdTab = await chrome.tabs.create({ url: call.args.url });
+        await waitForTabLoad(createdTab.id);
         return { status: "success" };
+      }
+
       case "wait":
         await new Promise(r => setTimeout(r, call.args.ms));
         return { status: "success" };
+
       case "click":
         await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: clickElement,
+          target: { tabId: tab.id },    // <-- no `world` here
+          world: "MAIN",                 // <-- pull `world` up
+          func: (selector) => {
+            const findElement = sel => {
+              if (sel.id) return document.getElementById(sel.id);
+              if (sel.name) return document.querySelector(`[name="${sel.name}"]`);
+              if (sel.placeholder) return document.querySelector(`[placeholder*="${sel.placeholder}"]`);
+              if (sel.class) return document.querySelector(`.${sel.class}`);
+              if (sel.tag && sel.text) {
+                return Array.from(document.querySelectorAll(sel.tag))
+                  .find(el => el.textContent.toLowerCase().includes(sel.text.toLowerCase()));
+              }
+              if (sel.tag) return document.querySelector(sel.tag);
+              return null;
+            };
+            const el = findElement(selector);
+            if (!el) throw new Error("click: element not found " + JSON.stringify(selector));
+            el.click();
+          },
           args: [call.args.selector]
         });
         return { status: "success" };
-      case "type_text":
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: typeText,
-          args: [call.args.selector, call.args.text, call.args.pressEnter]
-        });
-        return { status: "success" };
-      case "press_key":
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: pressKey,
-          args: [call.args.key]
-        });
-        return { status: "success" };
+
+    case "type_text":
+      // 1) type the text
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world:  "MAIN",
+        func: (selector, text) => {
+          // inline findElement
+          const findElement = sel => {
+            if (sel.id) return document.getElementById(sel.id);
+            if (sel.name) return document.querySelector(`[name="${sel.name}"]`);
+            if (sel.placeholder) return document.querySelector(`[placeholder*="${sel.placeholder}"]`);
+            if (sel.class) return document.querySelector(`.${sel.class}`);
+            if (sel.tag && sel.text) {
+              return Array.from(document.querySelectorAll(sel.tag))
+                          .find(el => el.textContent.toLowerCase().includes(sel.text.toLowerCase()));
+            }
+            if (sel.tag) return document.querySelector(sel.tag);
+            return null;
+          };
+
+          const el = findElement(selector);
+          if (!el) throw new Error("type_text: element not found " + JSON.stringify(selector));
+
+          el.focus();
+          el.value = text;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+
+          // 2) immediately submit:
+          //    a) real form submit if possible
+          if (el.form) {
+            el.form.submit();
+            return;
+          }
+          //    b) click a submit button
+          const ctx = el.form || document;
+          const btn = ctx.querySelector('input[type="submit"], button[type="submit"], button');
+          if (btn) {
+            btn.click();
+            return;
+          }
+          //    c) fallback to synthetic Enter on the element
+          ["keydown","keypress","keyup"].forEach(type => {
+            el.dispatchEvent(new KeyboardEvent(type, {
+              key: "Enter", code: "Enter",
+              charCode: 13, keyCode: 13, which: 13,
+              bubbles: true, cancelable: true
+            }));
+          });
+        },
+        args: [call.args.selector, call.args.text]
+      });
+      return { status: "success" };
+
+
+    case "press_key":
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: (key) => {
+          // dispatch on the currently focused element (or body as fallback)
+          const el = document.activeElement || document.body;
+          ["keydown", "keypress", "keyup"].forEach(type => {
+            el.dispatchEvent(new KeyboardEvent(type, {
+              key,
+              code: key,
+              charCode: key === "Enter" ? 13 : key.charCodeAt(0),
+              keyCode: key === "Enter" ? 13 : key.charCodeAt(0),
+              which: key === "Enter" ? 13 : key.charCodeAt(0),
+              bubbles: true,
+              cancelable: true
+            }));
+          });
+        },
+        args: [call.args.key]
+      });
+      return { status: "success" };
+
+
       default:
         throw new Error(`Unknown tool: ${call.tool}`);
     }
+
   } catch (e) {
     return { status: "error", message: e.message };
   }
@@ -91,6 +193,7 @@ async function executeSingleTool(call) {
 
 // Content script functions (inject these)
 function clickElement(selector) {
+  console.log("Clicked ", selector);
   const element = findElement(selector);
   if (element) {
     element.click();
@@ -100,6 +203,7 @@ function clickElement(selector) {
 }
 
 function typeText(selector, text, pressEnter) {
+  console.log("Typed ", text);
   const element = findElement(selector);
   if (element) {
     element.focus();
@@ -114,6 +218,7 @@ function typeText(selector, text, pressEnter) {
 }
 
 function pressKey(key) {
+  console.log("KeyDown ", key);
   document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
   return true;
 }
@@ -134,7 +239,7 @@ function findElement(selector) {
   }
   if (selector.tag && selector.text) {
     const elements = document.querySelectorAll(selector.tag);
-    return Array.from(elements).find(el => 
+    return Array.from(elements).find(el =>
       el.textContent.toLowerCase().includes(selector.text.toLowerCase())
     );
   }

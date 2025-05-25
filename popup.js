@@ -8,6 +8,10 @@ Each item must match one of:
 
   No prose. JSON array only.
   Note: Assume always the url is not open hence need to be opened always
+  ⚠️ **Important**:
+- If you type into a search field, set "pressEnter":true on the type_text call.
+- Or, after typing, emit a {"tool":"press_key","args":{"key":"Enter"}} call.
+- Always submit your query so the next page loads. 
 `;
 
 const chatBox = document.getElementById("chat");
